@@ -57,8 +57,7 @@ app.post("/create-token", async (req, res) => {
 
   try {
     // 🔥 IMPORTANT: replace after frontend deploy
-    const url = `http://localhost:3000/?token=${tokenId}`;
-
+    const url = `https://your-frontend-url.onrender.com/?token=${tokenId}`;
     const qrBuffer = await QRCode.toBuffer(url);
 
     const qrImage = await Jimp.read(qrBuffer);
