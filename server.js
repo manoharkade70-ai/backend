@@ -57,26 +57,26 @@ app.post("/create-token", async (req, res) => {
 
   try {
     // 🔥 IMPORTANT: replace after frontend deploy
-    const url = `https://your-frontend-url.onrender.com/?token=${tokenId}`;
-    const qrBuffer = await QRCode.toBuffer(url);
+    const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
 
-    const qrImage = await Jimp.read(qrBuffer);
-    const logo = await Jimp.read("logo.png");
+const qrBuffer = await QRCode.toBuffer(url);
 
-    logo.resize(45, 45);
+const qrImage = await Jimp.read(qrBuffer);
+const logo = await Jimp.read("logo.png");
 
-    const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
-    const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
+logo.resize(45, 45);
 
-    qrImage.composite(logo, x, y);
+const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
+const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
 
-    const finalQR = await qrImage.getBase64Async(Jimp.MIME_PNG);
+qrImage.composite(logo, x, y);
 
-    res.json({
-      message: "Token created",
-      qr: finalQR
-    });
+const finalQR = await qrImage.getBase64Async(Jimp.MIME_PNG);
 
+res.json({
+  message: "Token created",
+  qr: finalQR
+});
   } catch (err) {
     res.json({ message: "QR generation failed" });
   }
