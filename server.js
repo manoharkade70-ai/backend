@@ -153,7 +153,8 @@ app.get("/export-users", async (req, res) => {
 
 // REDEEM TOKEN
 app.post("/redeem-token", async (req, res) => {
-  const { tokenId, name, mobile } = req.body;
+  const tokenId = req.body.tokenId?.trim().toUpperCase();
+const { name, mobile } = req.body;
 
   const token = await Token.findOne({ tokenId });
 
