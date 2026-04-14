@@ -154,14 +154,18 @@ app.get("/export-users", async (req, res) => {
 // REDEEM TOKEN
 app.post("/redeem-token", async (req, res) => {
   const tokenId = req.body.tokenId?.trim().toUpperCase();
-const { name, mobile } = req.body;
+  const { name, mobile } = req.body;
+
+  console.log("📥 TOKEN RECEIVED:", tokenId);
 
   const token = await Token.findOne({ tokenId });
+
+  console.log("📦 TOKEN FOUND IN DB:", token);
 
   if (!token) {
     return res.json({ message: "Invalid token" });
   }
-
+  
   if (token.used) {
     return res.json({ message: "Already used" });
   }
