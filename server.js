@@ -58,14 +58,38 @@ app.post("/create-token", async (req, res) => {
   try {
     const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
 
-const finalQR = await QRCode.toDataURL(url);
+    // ✅ Generate QR with HIGH error correction
+    const qrBuffer = await QRCode.toBuffer(url, {
+      errorCorrectionLevel: "H",
+      width: 300,
+      margin: 2
+    });
 
-res.json({
-  message: "Token created",
-  qr: finalQR
-});
+    const qrImage = await Jimp.read(qrBuffer);
+    const logo = await Jimp.read("logo.png");
+
+    // 🔥 IMPORTANT: small logo only
+    logo.resize(60, 60);
+
+    const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
+    const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
+
+    // ✅ White background behind logo (VERY IMPORTANT)
+    const whiteBg = new Jimp(70, 70, "#FFFFFF");
+    qrImage.composite(whiteBg, x - 5, y - 5);
+
+    // Place logo
+    qrImage.composite(logo, x, y);
+
+    const finalQR = await qrImage.getBase64Async(Jimp.MIME_PNG);
+
+    res.json({
+      message: "Token created",
+      qr: finalQR
+    });
 
   } catch (err) {
+    console.log(err);
     res.json({ message: "QR generation failed" });
   }
 });
