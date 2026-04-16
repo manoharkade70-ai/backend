@@ -2,8 +2,9 @@ const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
 const QRCode = require("qrcode");
-const Jimp = require("jimp");
 const ExcelJS = require("exceljs");
+const Jimp = require("jimp");
+const archiver = require("archiver");
 require("dotenv").config();
 
 const app = express();
@@ -17,8 +18,6 @@ mongoose.connect(process.env.MONGO_URI)
   .catch(err => console.log(err));
 
 // ================= MODELS =================
-
-// Token Schema
 const tokenSchema = new mongoose.Schema({
   tokenId: String,
   value: Number,
@@ -30,7 +29,6 @@ const tokenSchema = new mongoose.Schema({
 
 const Token = mongoose.model("Token", tokenSchema);
 
-// User Schema
 const userSchema = new mongoose.Schema({
   name: String,
   mobile: String,
@@ -39,80 +37,83 @@ const userSchema = new mongoose.Schema({
 
 const User = mongoose.model("User", userSchema);
 
-// ================= ADMIN APIs =================
+// ================= ADMIN =================
 
-// CREATE TOKEN
+// 🔥 BULK QR + ZIP
 app.post("/create-token", async (req, res) => {
-  const { value } = req.body;
-
-  const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
-
-  const token = new Token({
-    tokenId,
-    value,
-    used: false
-  });
-
-  await token.save();
+  const { value, count } = req.body;
 
   try {
-    const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
+    const qrList = [];
 
-    // ✅ Generate QR with HIGH error correction
-    const qrBuffer = await QRCode.toBuffer(url, {
-      errorCorrectionLevel: "H",
-      width: 300,
-      margin: 2
+    for (let i = 0; i < count; i++) {
+
+      const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
+
+      const token = new Token({
+        tokenId,
+        value,
+        used: false
+      });
+
+      await token.save();
+
+      const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
+
+      const qrBuffer = await QRCode.toBuffer(url, {
+        errorCorrectionLevel: "H"
+      });
+
+      const qrImage = await Jimp.read(qrBuffer);
+      const logo = await Jimp.read("logo.png");
+
+      logo.resize(50, 50);
+
+      const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
+      const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
+
+      const whiteBg = new Jimp(60, 60, "#FFFFFF");
+      qrImage.composite(whiteBg, x - 5, y - 5);
+      qrImage.composite(logo, x, y);
+
+      const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
+
+      qrList.push({
+        tokenId,
+        buffer: finalQR
+      });
+    }
+
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
+
+    const archive = archiver("zip");
+    archive.pipe(res);
+
+    qrList.forEach(qr => {
+      archive.append(qr.buffer, { name: `qr-${qr.tokenId}.png` });
     });
 
-    const qrImage = await Jimp.read(qrBuffer);
-    const logo = await Jimp.read("logo.png");
-
-    // 🔥 IMPORTANT: small logo only
-    logo.resize(60, 60);
-
-    const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
-    const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
-
-    // ✅ White background behind logo (VERY IMPORTANT)
-    const whiteBg = new Jimp(70, 70, "#FFFFFF");
-    qrImage.composite(whiteBg, x - 5, y - 5);
-
-    // Place logo
-    qrImage.composite(logo, x, y);
-
-    const finalQR = await qrImage.getBase64Async(Jimp.MIME_PNG);
-
-    res.json({
-      message: "Token created",
-      qr: finalQR
-    });
+    await archive.finalize();
 
   } catch (err) {
     console.log(err);
-    res.json({ message: "QR generation failed" });
+    res.status(500).json({ message: "QR generation failed" });
   }
 });
 
-// GET ALL TOKENS
+// OTHER APIs
 app.get("/all-tokens", async (req, res) => {
   const tokens = await Token.find();
   res.json(tokens);
 });
 
-// CLEAR WALLET (ADMIN)
 app.post("/clear-wallet", async (req, res) => {
   const { mobile } = req.body;
-
-  await User.findOneAndUpdate(
-    { mobile },
-    { wallet: 0 }
-  );
-
+  await User.findOneAndUpdate({ mobile }, { wallet: 0 });
   res.json({ message: "Wallet cleared" });
 });
 
-// EXPORT USERS (EXCEL)
 app.get("/export-users", async (req, res) => {
   const users = await Token.find({ used: true });
 
@@ -135,40 +136,22 @@ app.get("/export-users", async (req, res) => {
     });
   });
 
-  res.setHeader(
-    "Content-Type",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-  );
-
-  res.setHeader(
-    "Content-Disposition",
-    "attachment; filename=users.xlsx"
-  );
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", "attachment; filename=users.xlsx");
 
   await workbook.xlsx.write(res);
   res.end();
 });
 
-// ================= USER APIs =================
-
-// REDEEM TOKEN
+// ================= USER =================
 app.post("/redeem-token", async (req, res) => {
   const tokenId = req.body.tokenId?.trim().toUpperCase();
   const { name, mobile } = req.body;
 
-  console.log("📥 TOKEN RECEIVED:", tokenId);
-
   const token = await Token.findOne({ tokenId });
 
-  console.log("📦 TOKEN FOUND IN DB:", token);
-
-  if (!token) {
-    return res.json({ message: "Invalid token" });
-  }
-  
-  if (token.used) {
-    return res.json({ message: "Already used" });
-  }
+  if (!token) return res.json({ message: "Invalid token" });
+  if (token.used) return res.json({ message: "Already used" });
 
   token.used = true;
   token.usedBy = name;
@@ -178,10 +161,7 @@ app.post("/redeem-token", async (req, res) => {
   await token.save();
 
   let user = await User.findOne({ mobile });
-
-  if (!user) {
-    user = new User({ name, mobile, wallet: 0 });
-  }
+  if (!user) user = new User({ name, mobile, wallet: 0 });
 
   user.wallet += token.value;
   await user.save();
@@ -189,10 +169,8 @@ app.post("/redeem-token", async (req, res) => {
   res.json({ message: `₹${token.value} added to wallet` });
 });
 
-// USER HISTORY
 app.get("/user-history/:mobile", async (req, res) => {
   const history = await Token.find({ mobile: req.params.mobile });
-
   const user = await User.findOne({ mobile: req.params.mobile });
 
   res.json({
@@ -202,7 +180,6 @@ app.get("/user-history/:mobile", async (req, res) => {
 });
 
 // ================= SERVER =================
-
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
