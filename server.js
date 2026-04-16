@@ -26,7 +26,6 @@ const tokenSchema = new mongoose.Schema({
   mobile: String,
   date: Date
 });
-
 const Token = mongoose.model("Token", tokenSchema);
 
 const userSchema = new mongoose.Schema({
@@ -34,20 +33,19 @@ const userSchema = new mongoose.Schema({
   mobile: String,
   wallet: { type: Number, default: 0 }
 });
-
 const User = mongoose.model("User", userSchema);
 
 // ================= ADMIN =================
 
-// 🔥 BULK QR + ZIP
+// 🔥 BULK QR + ZIP + LOGO
 app.post("/create-token", async (req, res) => {
-  const { value, count } = req.body;
+  const value = Number(req.body.value);
+  const count = Number(req.body.count);
 
   try {
     const qrList = [];
 
     for (let i = 0; i < count; i++) {
-
       const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
 
       const token = new Token({
@@ -78,10 +76,7 @@ app.post("/create-token", async (req, res) => {
 
       const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
 
-      qrList.push({
-        tokenId,
-        buffer: finalQR
-      });
+      qrList.push({ tokenId, buffer: finalQR });
     }
 
     res.setHeader("Content-Type", "application/zip");
@@ -102,18 +97,20 @@ app.post("/create-token", async (req, res) => {
   }
 });
 
-// OTHER APIs
+// GET TOKENS
 app.get("/all-tokens", async (req, res) => {
   const tokens = await Token.find();
   res.json(tokens);
 });
 
+// CLEAR WALLET
 app.post("/clear-wallet", async (req, res) => {
   const { mobile } = req.body;
   await User.findOneAndUpdate({ mobile }, { wallet: 0 });
   res.json({ message: "Wallet cleared" });
 });
 
+// EXPORT EXCEL
 app.get("/export-users", async (req, res) => {
   const users = await Token.find({ used: true });
 
@@ -144,6 +141,7 @@ app.get("/export-users", async (req, res) => {
 });
 
 // ================= USER =================
+
 app.post("/redeem-token", async (req, res) => {
   const tokenId = req.body.tokenId?.trim().toUpperCase();
   const { name, mobile } = req.body;
