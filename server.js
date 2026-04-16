@@ -44,40 +44,45 @@ app.post("/create-token", async (req, res) => {
 
   try {
     const qrList = [];
+  
+    const logo = await Jimp.read("logo.png");
 
-    for (let i = 0; i < count; i++) {
-      const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const tasks = Array.from({ length: count }, async () => {
 
-      const token = new Token({
-        tokenId,
-        value,
-        used: false
-      });
+  const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
 
-      await token.save();
+  const token = new Token({
+    tokenId,
+    value,
+    used: false
+  });
 
-      const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
+  await token.save();
 
-      const qrBuffer = await QRCode.toBuffer(url, {
-        errorCorrectionLevel: "H"
-      });
+  const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
 
-      const qrImage = await Jimp.read(qrBuffer);
-      const logo = await Jimp.read("logo.png");
+  const qrBuffer = await QRCode.toBuffer(url, {
+    errorCorrectionLevel: "H"
+  });
 
-      logo.resize(50, 50);
+  const qrImage = await Jimp.read(qrBuffer);
+  
+  logo.resize(50, 50);
 
-      const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
-      const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
+  const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
+  const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
 
-      const whiteBg = new Jimp(60, 60, "#FFFFFF");
-      qrImage.composite(whiteBg, x - 5, y - 5);
-      qrImage.composite(logo, x, y);
+  const whiteBg = new Jimp(60, 60, "#FFFFFF");
 
-      const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
+  qrImage.composite(whiteBg, x - 5, y - 5);
+  qrImage.composite(logo, x, y);
 
-      qrList.push({ tokenId, buffer: finalQR });
-    }
+  const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
+
+  return { tokenId, buffer: finalQR };
+});
+
+const qrList = await Promise.all(tasks);
 
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
