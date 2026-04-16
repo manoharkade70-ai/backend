@@ -42,64 +42,61 @@ app.post("/create-token", async (req, res) => {
   const value = Number(req.body.value);
   const count = Number(req.body.count);
 
-  try {
-    const qrList = [];
-  
-    const logo = await Jimp.read("logo.png");
+ try {
+  const logo = await Jimp.read("logo.png");
+  logo.resize(50, 50); // resize ONCE
 
-    const tasks = Array.from({ length: count }, async () => {
+  const tasks = Array.from({ length: count }, async () => {
 
-  const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
+    const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
 
-  const token = new Token({
-    tokenId,
-    value,
-    used: false
-  });
-
-  await token.save();
-
-  const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
-
-  const qrBuffer = await QRCode.toBuffer(url, {
-    errorCorrectionLevel: "H"
-  });
-
-  const qrImage = await Jimp.read(qrBuffer);
-  
-  logo.resize(50, 50);
-
-  const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
-  const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
-
-  const whiteBg = new Jimp(60, 60, "#FFFFFF");
-
-  qrImage.composite(whiteBg, x - 5, y - 5);
-  qrImage.composite(logo, x, y);
-
-  const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
-
-  return { tokenId, buffer: finalQR };
-});
-
-const qrList = await Promise.all(tasks);
-
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
-
-    const archive = archiver("zip");
-    archive.pipe(res);
-
-    qrList.forEach(qr => {
-      archive.append(qr.buffer, { name: `qr-${qr.tokenId}.png` });
+    const token = new Token({
+      tokenId,
+      value,
+      used: false
     });
 
-    await archive.finalize();
+    await token.save();
 
-  } catch (err) {
-    console.log(err);
-    res.status(500).json({ message: "QR generation failed" });
-  }
+    const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
+
+    const qrBuffer = await QRCode.toBuffer(url, {
+      errorCorrectionLevel: "H"
+    });
+
+    const qrImage = await Jimp.read(qrBuffer);
+
+    const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
+    const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
+
+    const whiteBg = new Jimp(60, 60, "#FFFFFF");
+
+    qrImage.composite(whiteBg, x - 5, y - 5);
+    qrImage.composite(logo, x, y);
+
+    const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
+
+    return { tokenId, buffer: finalQR };
+  });
+
+  const qrList = await Promise.all(tasks);
+
+  res.setHeader("Content-Type", "application/zip");
+  res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
+
+  const archive = archiver("zip");
+  archive.pipe(res);
+
+  qrList.forEach(qr => {
+    archive.append(qr.buffer, { name: `qr-${qr.tokenId}.png` });
+  });
+
+  await archive.finalize();
+
+} catch (err) {
+  console.log(err);
+  res.status(500).json({ message: "QR generation failed" });
+}
 });
 
 // GET TOKENS
