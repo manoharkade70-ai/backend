@@ -182,6 +182,6 @@ app.get("/user-history/:mobile", async (req, res) => {
 // ================= SERVER =================
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, () => {
+app.listen(PORT, "0.0.0.0", () => {
   console.log("Server running on port", PORT);
 });
