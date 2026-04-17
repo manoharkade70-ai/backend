@@ -37,146 +37,145 @@ const User = mongoose.model("User", userSchema);
 
 // ================= ADMIN =================
 
-// 🔥 BULK QR + ZIP + LOGO
 app.post("/create-token", async (req, res) => {
   const value = Number(req.body.value);
   const count = Number(req.body.count);
 
- try {
-  const logo = await Jimp.read("logo.png");
-  logo.resize(50, 50); // resize ONCE
+  try {
+    const logo = await Jimp.read("logo.png");
+    logo.resize(50, 50);
 
-  const tasks = Array.from({ length: count }, async () => {
+    const tasks = Array.from({ length: count }, async () => {
+      const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
 
-    const tokenId = Math.random().toString(36).substring(2, 10).toUpperCase();
+      const token = new Token({ tokenId, value, used: false });
+      await token.save();
 
-    const token = new Token({
-      tokenId,
-      value,
-      used: false
+      const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
+
+      const qrBuffer = await QRCode.toBuffer(url, { errorCorrectionLevel: "H" });
+      const qrImage = await Jimp.read(qrBuffer);
+
+      const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
+      const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
+
+      const whiteBg = new Jimp(60, 60, "#FFFFFF");
+      qrImage.composite(whiteBg, x - 5, y - 5);
+      qrImage.composite(logo, x, y);
+
+      const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
+      return { tokenId, buffer: finalQR };
     });
 
-    await token.save();
+    const qrList = await Promise.all(tasks);
 
-    const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
+    res.setHeader("Content-Type", "application/zip");
+    res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
 
-    const qrBuffer = await QRCode.toBuffer(url, {
-      errorCorrectionLevel: "H"
+    const archive = archiver("zip");
+    archive.pipe(res);
+
+    qrList.forEach(qr => {
+      archive.append(qr.buffer, { name: `qr-${qr.tokenId}.png` });
     });
 
-    const qrImage = await Jimp.read(qrBuffer);
+    await archive.finalize();
 
-    const x = (qrImage.bitmap.width - logo.bitmap.width) / 2;
-    const y = (qrImage.bitmap.height - logo.bitmap.height) / 2;
-
-    const whiteBg = new Jimp(60, 60, "#FFFFFF");
-
-    qrImage.composite(whiteBg, x - 5, y - 5);
-    qrImage.composite(logo, x, y);
-
-    const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
-
-    return { tokenId, buffer: finalQR };
-  });
-
-  const qrList = await Promise.all(tasks);
-
-  res.setHeader("Content-Type", "application/zip");
-  res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
-
-  const archive = archiver("zip");
-  archive.pipe(res);
-
-  qrList.forEach(qr => {
-    archive.append(qr.buffer, { name: `qr-${qr.tokenId}.png` });
-  });
-
-  await archive.finalize();
-
-} catch (err) {
-  console.log(err);
-  res.status(500).json({ message: "QR generation failed" });
-}
+  } catch (err) {
+    console.log(err);
+    res.status(500).json({ message: "QR generation failed" });
+  }
 });
 
-// GET TOKENS
 app.get("/all-tokens", async (req, res) => {
-  const tokens = await Token.find();
-  res.json(tokens);
+  try {
+    const tokens = await Token.find();
+    res.json(tokens);
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch tokens" });
+  }
 });
 
-// CLEAR WALLET
 app.post("/clear-wallet", async (req, res) => {
-  const { mobile } = req.body;
-  await User.findOneAndUpdate({ mobile }, { wallet: 0 });
-  res.json({ message: "Wallet cleared" });
+  try {
+    const { mobile } = req.body;
+    await User.findOneAndUpdate({ mobile }, { wallet: 0 });
+    res.json({ message: "Wallet cleared" });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to clear wallet" });
+  }
 });
 
-// EXPORT EXCEL
 app.get("/export-users", async (req, res) => {
-  const users = await Token.find({ used: true });
+  try {
+    const users = await Token.find({ used: true });
 
-  const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Users");
+    const workbook = new ExcelJS.Workbook();
+    const sheet = workbook.addWorksheet("Users");
 
-  sheet.columns = [
-    { header: "Name", key: "name" },
-    { header: "Mobile", key: "mobile" },
-    { header: "Token", key: "tokenId" },
-    { header: "Date", key: "date" }
-  ];
+    sheet.columns = [
+      { header: "Name", key: "name" },
+      { header: "Mobile", key: "mobile" },
+      { header: "Token", key: "tokenId" },
+      { header: "Date", key: "date" }
+    ];
 
-  users.forEach(u => {
-    sheet.addRow({
-      name: u.usedBy,
-      mobile: u.mobile,
-      tokenId: u.tokenId,
-      date: u.date
+    users.forEach(u => {
+      sheet.addRow({ name: u.usedBy, mobile: u.mobile, tokenId: u.tokenId, date: u.date });
     });
-  });
 
-  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  res.setHeader("Content-Disposition", "attachment; filename=users.xlsx");
+    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+    res.setHeader("Content-Disposition", "attachment; filename=users.xlsx");
 
-  await workbook.xlsx.write(res);
-  res.end();
+    await workbook.xlsx.write(res);
+    res.end();
+  } catch (err) {
+    res.status(500).json({ message: "Failed to export users" });
+  }
 });
 
 // ================= USER =================
 
 app.post("/redeem-token", async (req, res) => {
-  const tokenId = req.body.tokenId?.trim().toUpperCase();
-  const { name, mobile } = req.body;
+  try {
+    const tokenId = req.body.tokenId?.trim().toUpperCase();
+    const { name, mobile } = req.body;
 
-  const token = await Token.findOne({ tokenId });
+    if (!tokenId || !name || !mobile) {
+      return res.status(400).json({ message: "Missing fields" });
+    }
 
-  if (!token) return res.json({ message: "Invalid token" });
-  if (token.used) return res.json({ message: "Already used" });
+    const token = await Token.findOne({ tokenId });
 
-  token.used = true;
-  token.usedBy = name;
-  token.mobile = mobile;
-  token.date = new Date();
+    if (!token) return res.json({ message: "Invalid token" });
+    if (token.used) return res.json({ message: "Already used" });
 
-  await token.save();
+    token.used = true;
+    token.usedBy = name;
+    token.mobile = mobile;
+    token.date = new Date();
+    await token.save();
 
-  let user = await User.findOne({ mobile });
-  if (!user) user = new User({ name, mobile, wallet: 0 });
+    let user = await User.findOne({ mobile });
+    if (!user) user = new User({ name, mobile, wallet: 0 });
 
-  user.wallet += token.value;
-  await user.save();
+    user.wallet += token.value;
+    await user.save();
 
-  res.json({ message: `₹${token.value} added to wallet` });
+    res.json({ message: `₹${token.value} added to wallet` });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to redeem token" });
+  }
 });
 
 app.get("/user-history/:mobile", async (req, res) => {
-  const history = await Token.find({ mobile: req.params.mobile });
-  const user = await User.findOne({ mobile: req.params.mobile });
-
-  res.json({
-    history,
-    wallet: user ? user.wallet : 0
-  });
+  try {
+    const history = await Token.find({ mobile: req.params.mobile });
+    const user = await User.findOne({ mobile: req.params.mobile });
+    res.json({ history, wallet: user ? user.wallet : 0 });
+  } catch (err) {
+    res.status(500).json({ message: "Failed to fetch history" });
+  }
 });
 
 // ================= SERVER =================
