@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const QRCode = require("qrcode");
 const ExcelJS = require("exceljs");
-const Jimp = require("jimp");
+const sharp = require("sharp");
 const archiver = require("archiver");
 require("dotenv").config();
 
@@ -37,69 +37,66 @@ const User = mongoose.model("User", userSchema);
 
 // ================= ADMIN =================
 
-// 🔥 BULK QR + ZIP + LOGO — OPTIMIZED
+// ✅ Pre-load and resize logo ONCE when server starts
+let logoBuffer = null;
+sharp("logo.png")
+  .resize(50, 50)
+  .toBuffer()
+  .then(buf => {
+    logoBuffer = buf;
+    console.log("Logo loaded");
+  })
+  .catch(err => console.log("Logo load failed:", err));
+
 app.post("/create-token", async (req, res) => {
   const value = Number(req.body.value);
   const count = Number(req.body.count);
 
   try {
-    // ✅ Read and resize logo ONCE before all tasks
-    const logo = await Jimp.read("logo.png");
-    logo.resize(50, 50);
-    const logoWidth = logo.bitmap.width;
-    const logoHeight = logo.bitmap.height;
+    if (!logoBuffer) {
+      return res.status(500).json({ message: "Logo not ready" });
+    }
 
-    // ✅ Generate all tokenIds and save to DB in one bulk insert
+    // ✅ All tokenIds generated at once
     const tokenIds = Array.from({ length: count }, () =>
       Math.random().toString(36).substring(2, 10).toUpperCase()
     );
 
+    // ✅ One bulk DB insert instead of N saves
     await Token.insertMany(tokenIds.map(tokenId => ({
       tokenId,
       value,
       used: false
     })));
 
-    // ✅ Process QRs in batches of 5 to avoid memory overload on Render
-    const BATCH_SIZE = 5;
-    const qrList = [];
+    // ✅ All QRs generated in parallel with sharp (very fast)
+    const qrList = await Promise.all(tokenIds.map(async (tokenId) => {
+      const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
 
-    for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
-      const batch = tokenIds.slice(i, i + BATCH_SIZE);
+      // Generate QR as PNG buffer
+      const qrBuffer = await QRCode.toBuffer(url, {
+        errorCorrectionLevel: "H",
+        width: 300,
+        margin: 1
+      });
 
-      const batchResults = await Promise.all(batch.map(async (tokenId) => {
-        const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
+      // Overlay logo in center using sharp composite
+      const finalQR = await sharp(qrBuffer)
+        .composite([{
+          input: logoBuffer,
+          gravity: "center"
+        }])
+        .png()
+        .toBuffer();
 
-        // ✅ Generate QR as buffer directly
-        const qrBuffer = await QRCode.toBuffer(url, {
-          errorCorrectionLevel: "H",
-          width: 300  // fixed size avoids dynamic resize calculations
-        });
+      return { tokenId, buffer: finalQR };
+    }));
 
-        const qrImage = await Jimp.read(qrBuffer);
-
-        const x = Math.floor((qrImage.bitmap.width - logoWidth) / 2);
-        const y = Math.floor((qrImage.bitmap.height - logoHeight) / 2);
-
-        // ✅ Clone logo for each QR to avoid mutation across parallel tasks
-        const logoClone = logo.clone();
-        const whiteBg = new Jimp(60, 60, 0xFFFFFFFF);
-
-        qrImage.composite(whiteBg, x - 5, y - 5);
-        qrImage.composite(logoClone, x, y);
-
-        const finalQR = await qrImage.getBufferAsync(Jimp.MIME_PNG);
-        return { tokenId, buffer: finalQR };
-      }));
-
-      qrList.push(...batchResults);
-    }
-
-    // ✅ Stream zip directly to response
+    // ✅ Stream zip to response
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
 
-    const archive = archiver("zip", { zlib: { level: 1 } }); // ✅ level 1 = fast compression
+    const archive = archiver("zip", { zlib: { level: 1 } });
     archive.pipe(res);
 
     qrList.forEach(qr => {
