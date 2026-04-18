@@ -57,51 +57,49 @@ app.post("/create-token", async (req, res) => {
       return res.status(500).json({ message: "Logo not ready" });
     }
 
-    // ✅ All tokenIds generated at once
     const tokenIds = Array.from({ length: count }, () =>
-      Math.random().toString(36).substring(2, 10).toUpperCase()
+      require("crypto").randomBytes(4).toString("hex").toUpperCase()
     );
 
-    // ✅ One bulk DB insert instead of N saves
     await Token.insertMany(tokenIds.map(tokenId => ({
       tokenId,
       value,
       used: false
     })));
 
-    // ✅ All QRs generated in parallel with sharp (very fast)
-    const qrList = await Promise.all(tokenIds.map(async (tokenId) => {
-      const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
-
-      // Generate QR as PNG buffer
-      const qrBuffer = await QRCode.toBuffer(url, {
-        errorCorrectionLevel: "H",
-        width: 300,
-        margin: 1
-      });
-
-      // Overlay logo in center using sharp composite
-      const finalQR = await sharp(qrBuffer)
-        .composite([{
-          input: logoBuffer,
-          gravity: "center"
-        }])
-        .png()
-        .toBuffer();
-
-      return { tokenId, buffer: finalQR };
-    }));
-
-    // ✅ Stream zip to response
     res.setHeader("Content-Type", "application/zip");
     res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
 
     const archive = archiver("zip", { zlib: { level: 1 } });
     archive.pipe(res);
 
-    qrList.forEach(qr => {
-      archive.append(qr.buffer, { name: `qr-${qr.tokenId}.png` });
-    });
+    const BATCH_SIZE = 10; // can tune later
+
+    for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
+      const batch = tokenIds.slice(i, i + BATCH_SIZE);
+
+      const results = await Promise.all(batch.map(async (tokenId) => {
+        const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
+
+        const qrBuffer = await QRCode.toBuffer(url, {
+          errorCorrectionLevel: "H",
+          width: 300,
+          margin: 1
+        });
+
+        const finalQR = await sharp(qrBuffer)
+          .composite([{ input: logoBuffer, gravity: "center" }])
+          .png()
+          .toBuffer();
+
+        return { tokenId, buffer: finalQR };
+      }));
+
+      // 🔥 append immediately → no memory buildup
+      results.forEach(qr => {
+        archive.append(qr.buffer, { name: `qr-${qr.tokenId}.png` });
+      });
+    }
 
     await archive.finalize();
 
