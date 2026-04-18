@@ -73,7 +73,7 @@ app.post("/create-token", async (req, res) => {
     const archive = archiver("zip", { zlib: { level: 1 } });
     archive.pipe(res);
 
-    const BATCH_SIZE = 25; // can tune later
+    const BATCH_SIZE = 50; // can tune later
 
     for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
       const batch = tokenIds.slice(i, i + BATCH_SIZE);
@@ -83,7 +83,7 @@ app.post("/create-token", async (req, res) => {
 
         const qrBuffer = await QRCode.toBuffer(url, {
           errorCorrectionLevel: "H",
-          width: 250,
+          width: 220,
           margin: 1
         });
 
