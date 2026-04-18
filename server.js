@@ -48,65 +48,55 @@ sharp("logo.png")
   })
   .catch(err => console.log("Logo load failed:", err));
 
+const { Queue } = require("bullmq");
+
+const qrQueue = new Queue("qr-jobs", {
+  connection: {
+  host: process.env.REDIS_HOST,
+  port: Number(process.env.REDIS_PORT),
+  password: process.env.REDIS_PASSWORD,
+  tls: {}
+}
+});
+
 app.post("/create-token", async (req, res) => {
-  const value = Number(req.body.value);
-  const count = Number(req.body.count);
+  const { value, count } = req.body;
 
   try {
-    if (!logoBuffer) {
-      return res.status(500).json({ message: "Logo not ready" });
-    }
+    const job = await qrQueue.add("generate-qrs", { value, count });
 
-    const tokenIds = Array.from({ length: count }, () =>
-      require("crypto").randomBytes(4).toString("hex").toUpperCase()
-    );
-
-    await Token.insertMany(tokenIds.map(tokenId => ({
-      tokenId,
-      value,
-      used: false
-    })));
-
-    res.setHeader("Content-Type", "application/zip");
-    res.setHeader("Content-Disposition", "attachment; filename=qrcodes.zip");
-
-    const archive = archiver("zip", { zlib: { level: 1 } });
-    archive.pipe(res);
-
-    const BATCH_SIZE = 50; // can tune later
-
-    for (let i = 0; i < tokenIds.length; i += BATCH_SIZE) {
-      const batch = tokenIds.slice(i, i + BATCH_SIZE);
-
-      const results = await Promise.all(batch.map(async (tokenId) => {
-        const url = `https://frontend-t7zf.onrender.com/#/?token=${tokenId}`;
-
-        const qrBuffer = await QRCode.toBuffer(url, {
-          errorCorrectionLevel: "H",
-          width: 220,
-          margin: 1
-        });
-
-        const finalQR = await sharp(qrBuffer)
-          .composite([{ input: logoBuffer, gravity: "center" }])
-          .png()
-          .toBuffer();
-
-        return { tokenId, buffer: finalQR };
-      }));
-
-      // 🔥 append immediately → no memory buildup
-      results.forEach(qr => {
-        archive.append(qr.buffer, { name: `qr-${qr.tokenId}.png` });
-      });
-    }
-
-    await archive.finalize();
+    res.json({
+      message: "Job started",
+      jobId: job.id
+    });
 
   } catch (err) {
     console.log(err);
-    res.status(500).json({ message: "QR generation failed" });
+    res.status(500).json({ message: "Failed to start job" });
   }
+});
+
+app.get("/job-status/:id", async (req, res) => {
+  const job = await qrQueue.getJob(req.params.id);
+  if (!job) return res.status(404).json({ message: "Job not found" });
+
+  const state = await job.getState();
+
+  res.json({
+    status: state,
+    result: job.returnvalue || null
+  });
+});
+
+
+app.get("/download/:id", async (req, res) => {
+  const job = await qrQueue.getJob(req.params.id);
+
+  if (!job || job.returnvalue?.filePath == null) {
+    return res.status(400).json({ message: "File not ready" });
+  }
+
+  res.download(job.returnvalue.filePath);
 });
 
 app.get("/all-tokens", async (req, res) => {
