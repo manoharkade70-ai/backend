@@ -38,7 +38,9 @@ const User = mongoose.model("User", userSchema);
 // ================= ADMIN SECURITY =================
 
 function checkAdmin(req, res, next) {
-  if (req.headers["x-admin-key"] !== process.env.ADMIN_KEY) {
+  const key = req.headers["x-admin-key"] || req.query.key;
+
+  if (key !== process.env.ADMIN_KEY) {
     return res.status(401).json({ message: "Unauthorized" });
   }
   next();
@@ -55,7 +57,7 @@ app.post("/admin-login", (req, res) => {
   res.json({ token: process.env.ADMIN_KEY });
 });
 
-// ================= DIRECT QR GENERATION =================
+// ================= QR GENERATION =================
 
 app.post("/create-token", checkAdmin, async (req, res) => {
   const { value, count } = req.body;
@@ -77,7 +79,8 @@ app.post("/create-token", checkAdmin, async (req, res) => {
       await Token.create({
         tokenId,
         value,
-        used: false
+        used: false,
+        date: new Date()   // ✅ FIXED
       });
 
       const qrBuffer = await QRCode.toBuffer(
@@ -95,93 +98,99 @@ app.post("/create-token", checkAdmin, async (req, res) => {
   }
 });
 
+// ================= DATE GROUP API =================
+
+app.get("/tokens-by-date", checkAdmin, async (req, res) => {
+  try {
+    const tokens = await Token.find();
+
+    const grouped = {};
+
+    tokens.forEach(t => {
+      if (!t.date) return;
+
+      const d = new Date(t.date).toLocaleDateString();
+
+      if (!grouped[d]) grouped[d] = [];
+      grouped[d].push(t);
+    });
+
+    res.json(grouped);
+
+  } catch {
+    res.status(500).json({ message: "Error grouping tokens" });
+  }
+});
+
 // ================= ADMIN ROUTES =================
 
 app.get("/all-tokens", checkAdmin, async (req, res) => {
-  try {
-    const tokens = await Token.find();
-    res.json(tokens);
-  } catch {
-    res.status(500).json({ message: "Failed to fetch tokens" });
-  }
+  const tokens = await Token.find();
+  res.json(tokens);
 });
 
 app.post("/clear-wallet", checkAdmin, async (req, res) => {
-  try {
-    const { mobile } = req.body;
-    await User.findOneAndUpdate({ mobile }, { wallet: 0 });
-    res.json({ message: "Wallet cleared" });
-  } catch {
-    res.status(500).json({ message: "Failed to clear wallet" });
-  }
+  const { mobile } = req.body;
+  await User.findOneAndUpdate({ mobile }, { wallet: 0 });
+  res.json({ message: "Wallet cleared" });
 });
 
+// ✅ Excel FIXED
 app.get("/export-users", checkAdmin, async (req, res) => {
-  try {
-    const users = await Token.find({ used: true });
+  const users = await Token.find({ used: true });
 
-    const workbook = new ExcelJS.Workbook();
-    const sheet = workbook.addWorksheet("Users");
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Users");
 
-    sheet.columns = [
-      { header: "Name", key: "name" },
-      { header: "Mobile", key: "mobile" },
-      { header: "Token", key: "tokenId" },
-      { header: "Date", key: "date" }
-    ];
+  sheet.columns = [
+    { header: "Name", key: "name" },
+    { header: "Mobile", key: "mobile" },
+    { header: "Token", key: "tokenId" },
+    { header: "Date", key: "date" }
+  ];
 
-    users.forEach(u => {
-      sheet.addRow({
-        name: u.usedBy,
-        mobile: u.mobile,
-        tokenId: u.tokenId,
-        date: u.date
-      });
+  users.forEach(u => {
+    sheet.addRow({
+      name: u.usedBy,
+      mobile: u.mobile,
+      tokenId: u.tokenId,
+      date: u.date
     });
+  });
 
-    res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-    res.setHeader("Content-Disposition", "attachment; filename=users.xlsx");
+  res.setHeader("Content-Type",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", "attachment; filename=users.xlsx");
 
-    await workbook.xlsx.write(res);
-    res.end();
-
-  } catch {
-    res.status(500).json({ message: "Failed to export users" });
-  }
+  await workbook.xlsx.write(res);
+  res.end();
 });
 
 // ================= USER =================
 
 app.post("/redeem-token", async (req, res) => {
-  try {
-    const tokenId = req.body.tokenId?.trim().toUpperCase();
-    const { name, mobile } = req.body;
+  const tokenId = req.body.tokenId?.trim().toUpperCase();
+  const { name, mobile } = req.body;
 
-    const token = await Token.findOne({ tokenId });
+  const token = await Token.findOne({ tokenId });
 
-    if (!token) return res.json({ message: "Invalid token" });
-    if (token.used) return res.json({ message: "Already used" });
+  if (!token) return res.json({ message: "Invalid token" });
+  if (token.used) return res.json({ message: "Already used" });
 
-    token.used = true;
-    token.usedBy = name;
-    token.mobile = mobile;
-    token.date = new Date();
-    await token.save();
+  token.used = true;
+  token.usedBy = name;
+  token.mobile = mobile;
+  token.date = new Date();
+  await token.save();
 
-    let user = await User.findOne({ mobile });
-    if (!user) user = new User({ name, mobile, wallet: 0 });
+  let user = await User.findOne({ mobile });
+  if (!user) user = new User({ name, mobile, wallet: 0 });
 
-    user.wallet += token.value;
-    await user.save();
+  user.wallet += token.value;
+  await user.save();
 
-    res.json({ message: `₹${token.value} added to wallet` });
-
-  } catch {
-    res.status(500).json({ message: "Failed to redeem token" });
-  }
+  res.json({ message: `₹${token.value} added to wallet` });
 });
-
-// ================= SERVER =================
 
 const PORT = process.env.PORT || 5000;
 
