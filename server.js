@@ -1,10 +1,8 @@
 const express = require("express");
 const mongoose = require("mongoose");
 const cors = require("cors");
-const QRCode = require("qrcode");
 const ExcelJS = require("exceljs");
 const sharp = require("sharp");
-const archiver = require("archiver");
 require("dotenv").config();
 
 const app = express();
@@ -14,17 +12,10 @@ app.use(express.json());
 
 // ================= DB =================
 mongoose.connect(process.env.MONGO_URI)
-  .then(async () => {
-    console.log("MongoDB connected");
-
-    // 🔥 CREATE ADMIN ONCE
-   
-  })
+  .then(() => console.log("MongoDB connected"))
   .catch(err => console.log(err));
+
 // ================= MODELS =================
-
-// 🔐 Admin Schema
-
 
 const tokenSchema = new mongoose.Schema({
   tokenId: String,
@@ -45,7 +36,6 @@ const User = mongoose.model("User", userSchema);
 
 // ================= ADMIN SECURITY =================
 
-// 🔐 Middleware
 function checkAdmin(req, res, next) {
   if (req.headers["x-admin-key"] !== process.env.ADMIN_KEY) {
     return res.status(401).json({ message: "Unauthorized" });
@@ -53,9 +43,12 @@ function checkAdmin(req, res, next) {
   next();
 }
 
-// 🔐 FINAL LOGIN (ENV BASED)
+// ✅ FINAL LOGIN (ENV BASED)
 app.post("/admin-login", (req, res) => {
   const { password } = req.body;
+
+  console.log("LOGIN ATTEMPT:", password);
+  console.log("ENV PASSWORD:", process.env.ADMIN_PASSWORD);
 
   if (password !== process.env.ADMIN_PASSWORD) {
     return res.status(401).json({ message: "Wrong password" });
@@ -63,18 +56,6 @@ app.post("/admin-login", (req, res) => {
 
   res.json({ token: process.env.ADMIN_KEY });
 });
-
-// ================= LOGO =================
-
-let logoBuffer = null;
-sharp("logo.png")
-  .resize(50, 50)
-  .toBuffer()
-  .then(buf => {
-    logoBuffer = buf;
-    console.log("Logo loaded");
-  })
-  .catch(err => console.log("Logo load failed:", err));
 
 // ================= QUEUE =================
 
@@ -94,7 +75,6 @@ const qrQueue = new Queue("qr-jobs", {
 app.post("/create-token", checkAdmin, async (req, res) => {
   const { value, count } = req.body;
 
-  // 🔥 LIMIT
   if (count > 1000) {
     return res.status(400).json({ message: "Limit exceeded" });
   }
@@ -139,7 +119,7 @@ app.get("/all-tokens", checkAdmin, async (req, res) => {
   try {
     const tokens = await Token.find();
     res.json(tokens);
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Failed to fetch tokens" });
   }
 });
@@ -149,7 +129,7 @@ app.post("/clear-wallet", checkAdmin, async (req, res) => {
     const { mobile } = req.body;
     await User.findOneAndUpdate({ mobile }, { wallet: 0 });
     res.json({ message: "Wallet cleared" });
-  } catch (err) {
+  } catch {
     res.status(500).json({ message: "Failed to clear wallet" });
   }
 });
@@ -182,7 +162,8 @@ app.get("/export-users", checkAdmin, async (req, res) => {
 
     await workbook.xlsx.write(res);
     res.end();
-  } catch (err) {
+
+  } catch {
     res.status(500).json({ message: "Failed to export users" });
   }
 });
@@ -216,7 +197,8 @@ app.post("/redeem-token", async (req, res) => {
     await user.save();
 
     res.json({ message: `₹${token.value} added to wallet` });
-  } catch (err) {
+
+  } catch {
     res.status(500).json({ message: "Failed to redeem token" });
   }
 });
@@ -230,7 +212,8 @@ app.get("/user-history/:mobile", async (req, res) => {
       history,
       wallet: user ? user.wallet : 0
     });
-  } catch (err) {
+
+  } catch {
     res.status(500).json({ message: "Failed to fetch history" });
   }
 });
@@ -238,6 +221,6 @@ app.get("/user-history/:mobile", async (req, res) => {
 // ================= SERVER =================
 const PORT = process.env.PORT || 5000;
 
-app.listen(PORT, "0.0.0.0", () => {
+app.listen(PORT, () => {
   console.log("Server running on port", PORT);
 });
