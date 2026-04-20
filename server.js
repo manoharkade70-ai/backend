@@ -53,33 +53,15 @@ function checkAdmin(req, res, next) {
   next();
 }
 
-// 🔐 Login
-app.post("/admin-login", async (req, res) => {
+// 🔐 FINAL LOGIN (ENV BASED)
+app.post("/admin-login", (req, res) => {
   const { password } = req.body;
 
-  const admin = await Admin.findOne();
-
-  if (!admin || admin.password !== password) {
+  if (password !== process.env.ADMIN_PASSWORD) {
     return res.status(401).json({ message: "Wrong password" });
   }
 
   res.json({ token: process.env.ADMIN_KEY });
-});
-
-// 🔐 Change Password
-app.post("/change-password", async (req, res) => {
-  const { oldPassword, newPassword } = req.body;
-
-  const admin = await Admin.findOne();
-
-  if (!admin || admin.password !== oldPassword) {
-    return res.status(400).json({ message: "Wrong old password" });
-  }
-
-  admin.password = newPassword;
-  await admin.save();
-
-  res.json({ message: "Password updated" });
 });
 
 // ================= LOGO =================
