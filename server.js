@@ -24,10 +24,7 @@ mongoose.connect(process.env.MONGO_URI)
 // ================= MODELS =================
 
 // 🔐 Admin Schema
-const adminSchema = new mongoose.Schema({
-  password: String
-});
-const Admin = mongoose.model("Admin", adminSchema);
+
 
 const tokenSchema = new mongoose.Schema({
   tokenId: String,
