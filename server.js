@@ -14,10 +14,21 @@ app.use(express.json());
 
 // ================= DB =================
 mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB connected"))
-  .catch(err => console.log(err));
+  .then(async () => {
+    console.log("MongoDB connected");
 
+    // 🔥 CREATE ADMIN ONCE
+   
+  })
+  .catch(err => console.log(err));
 // ================= MODELS =================
+
+// 🔐 Admin Schema
+const adminSchema = new mongoose.Schema({
+  password: String
+});
+const Admin = mongoose.model("Admin", adminSchema);
+
 const tokenSchema = new mongoose.Schema({
   tokenId: String,
   value: Number,
@@ -35,9 +46,47 @@ const userSchema = new mongoose.Schema({
 });
 const User = mongoose.model("User", userSchema);
 
-// ================= ADMIN =================
+// ================= ADMIN SECURITY =================
 
-// ✅ Pre-load and resize logo ONCE when server starts
+// 🔐 Middleware
+function checkAdmin(req, res, next) {
+  if (req.headers["x-admin-key"] !== process.env.ADMIN_KEY) {
+    return res.status(401).json({ message: "Unauthorized" });
+  }
+  next();
+}
+
+// 🔐 Login
+app.post("/admin-login", async (req, res) => {
+  const { password } = req.body;
+
+  const admin = await Admin.findOne();
+
+  if (!admin || admin.password !== password) {
+    return res.status(401).json({ message: "Wrong password" });
+  }
+
+  res.json({ token: process.env.ADMIN_KEY });
+});
+
+// 🔐 Change Password
+app.post("/change-password", async (req, res) => {
+  const { oldPassword, newPassword } = req.body;
+
+  const admin = await Admin.findOne();
+
+  if (!admin || admin.password !== oldPassword) {
+    return res.status(400).json({ message: "Wrong old password" });
+  }
+
+  admin.password = newPassword;
+  await admin.save();
+
+  res.json({ message: "Password updated" });
+});
+
+// ================= LOGO =================
+
 let logoBuffer = null;
 sharp("logo.png")
   .resize(50, 50)
@@ -48,19 +97,28 @@ sharp("logo.png")
   })
   .catch(err => console.log("Logo load failed:", err));
 
+// ================= QUEUE =================
+
 const { Queue } = require("bullmq");
 
 const qrQueue = new Queue("qr-jobs", {
   connection: {
-  host: process.env.REDIS_HOST,
-  port: Number(process.env.REDIS_PORT),
-  password: process.env.REDIS_PASSWORD,
-  tls: {}
-}
+    host: process.env.REDIS_HOST,
+    port: Number(process.env.REDIS_PORT),
+    password: process.env.REDIS_PASSWORD,
+    tls: {}
+  }
 });
 
-app.post("/create-token", async (req, res) => {
+// ================= ADMIN ROUTES =================
+
+app.post("/create-token", checkAdmin, async (req, res) => {
   const { value, count } = req.body;
+
+  // 🔥 LIMIT
+  if (count > 1000) {
+    return res.status(400).json({ message: "Limit exceeded" });
+  }
 
   try {
     const job = await qrQueue.add("generate-qrs", { value, count });
@@ -88,7 +146,6 @@ app.get("/job-status/:id", async (req, res) => {
   });
 });
 
-
 app.get("/download/:id", async (req, res) => {
   const job = await qrQueue.getJob(req.params.id);
 
@@ -99,7 +156,7 @@ app.get("/download/:id", async (req, res) => {
   res.download(job.returnvalue.filePath);
 });
 
-app.get("/all-tokens", async (req, res) => {
+app.get("/all-tokens", checkAdmin, async (req, res) => {
   try {
     const tokens = await Token.find();
     res.json(tokens);
@@ -108,7 +165,7 @@ app.get("/all-tokens", async (req, res) => {
   }
 });
 
-app.post("/clear-wallet", async (req, res) => {
+app.post("/clear-wallet", checkAdmin, async (req, res) => {
   try {
     const { mobile } = req.body;
     await User.findOneAndUpdate({ mobile }, { wallet: 0 });
@@ -118,7 +175,7 @@ app.post("/clear-wallet", async (req, res) => {
   }
 });
 
-app.get("/export-users", async (req, res) => {
+app.get("/export-users", checkAdmin, async (req, res) => {
   try {
     const users = await Token.find({ used: true });
 
@@ -133,7 +190,12 @@ app.get("/export-users", async (req, res) => {
     ];
 
     users.forEach(u => {
-      sheet.addRow({ name: u.usedBy, mobile: u.mobile, tokenId: u.tokenId, date: u.date });
+      sheet.addRow({
+        name: u.usedBy,
+        mobile: u.mobile,
+        tokenId: u.tokenId,
+        date: u.date
+      });
     });
 
     res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
@@ -184,7 +246,11 @@ app.get("/user-history/:mobile", async (req, res) => {
   try {
     const history = await Token.find({ mobile: req.params.mobile });
     const user = await User.findOne({ mobile: req.params.mobile });
-    res.json({ history, wallet: user ? user.wallet : 0 });
+
+    res.json({
+      history,
+      wallet: user ? user.wallet : 0
+    });
   } catch (err) {
     res.status(500).json({ message: "Failed to fetch history" });
   }
