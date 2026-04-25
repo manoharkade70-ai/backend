@@ -58,6 +58,26 @@ app.post("/admin-login", (req, res) => {
   res.json({ token: process.env.ADMIN_KEY });
 });
 
+//===================Wallet, History===============
+app.get("/user/:mobile", async (req, res) => {
+  const { mobile } = req.params;
+
+  const user = await User.findOne({ mobile });
+
+  if (!user) {
+    return res.json({
+      wallet: 0,
+      history: []
+    });
+  }
+
+  const tokens = await Token.find({ mobile });
+
+  res.json({
+    wallet: user.wallet,
+    history: tokens
+  });
+});
 // ================= QR GENERATION =================
 
 app.post("/create-token", checkAdmin, async (req, res) => {
@@ -205,7 +225,14 @@ app.post("/redeem-token", async (req, res) => {
   const token = await Token.findOne({ tokenId });
 
   if (!token) return res.json({ message: "Invalid token" });
-  if (token.used) return res.json({ message: "Already used" });
+  if (token.used) {
+  const user = await User.findOne({ mobile });
+
+  return res.json({
+    message: "Already used",
+    wallet: user ? user.wallet : 0
+  });
+}
 
   token.used = true;
   token.usedBy = name;
