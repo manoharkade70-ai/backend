@@ -219,7 +219,10 @@ app.post("/redeem-token", async (req, res) => {
   user.wallet += token.value;
   await user.save();
 
-  res.json({ message: `₹${token.value} added to wallet` });
+  res.json({
+  message: `₹${token.value} added to wallet`,
+  wallet: user.wallet
+});
 });
 
 const PORT = process.env.PORT || 5000;
