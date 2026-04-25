@@ -4,6 +4,7 @@ const cors = require("cors");
 const ExcelJS = require("exceljs");
 const QRCode = require("qrcode");
 const archiver = require("archiver");
+const Jimp = require("jimp"); // ✅ ADDED (ONLY NEW LINE)
 require("dotenv").config();
 
 const app = express();
@@ -80,14 +81,31 @@ app.post("/create-token", checkAdmin, async (req, res) => {
         tokenId,
         value,
         used: false,
-        date: new Date()   // ✅ FIXED
+        date: new Date()
       });
+
+      // ================= QR WITH LOGO FIX =================
 
       const qrBuffer = await QRCode.toBuffer(
         `https://frontend-t7zf.onrender.com/#/redeem/${tokenId}`
       );
 
-      archive.append(qrBuffer, { name: `${tokenId}.png` });
+      const qrImage = await Jimp.read(qrBuffer);
+      const logo = await Jimp.read("logo.png"); // ⚠️ place logo.png in backend root
+
+      logo.resize(80, 80); // safe size
+
+      qrImage.composite(
+        logo,
+        qrImage.bitmap.width / 2 - 40,
+        qrImage.bitmap.height / 2 - 40
+      );
+
+      const finalBuffer = await qrImage.getBufferAsync(Jimp.MIME_PNG);
+
+      archive.append(finalBuffer, { name: `${tokenId}.png` });
+
+      // ================= END FIX =================
     }
 
     await archive.finalize();
@@ -135,7 +153,8 @@ app.post("/clear-wallet", checkAdmin, async (req, res) => {
   res.json({ message: "Wallet cleared" });
 });
 
-// ✅ Excel FIXED
+// ================= EXCEL =================
+
 app.get("/export-users", checkAdmin, async (req, res) => {
   const users = await Token.find({ used: true });
 
