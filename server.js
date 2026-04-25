@@ -4,7 +4,7 @@ const cors = require("cors");
 const ExcelJS = require("exceljs");
 const QRCode = require("qrcode");
 const archiver = require("archiver");
-const Jimp = require("jimp"); // ✅ ADDED (ONLY NEW LINE)
+const Jimp = require("jimp"); // ✅ already added earlier
 require("dotenv").config();
 
 const app = express();
@@ -84,21 +84,32 @@ app.post("/create-token", checkAdmin, async (req, res) => {
         date: new Date()
       });
 
-      // ================= QR WITH LOGO FIX =================
+      // ================= FIXED QR =================
 
       const qrBuffer = await QRCode.toBuffer(
-        `https://frontend-t7zf.onrender.com/#/redeem/${tokenId}`
+        `https://frontend-t7zf.onrender.com/#/redeem/${tokenId}`,
+        {
+          errorCorrectionLevel: "H", // ✅ HIGH correction
+          margin: 2,
+          scale: 8
+        }
       );
 
       const qrImage = await Jimp.read(qrBuffer);
-      const logo = await Jimp.read("logo.png"); // ⚠️ place logo.png in backend root
+      const logo = await Jimp.read("logo.png"); // keep your logo here
 
-      logo.resize(80, 80); // safe size
+      // smaller logo (important)
+      logo.resize(60, 60);
 
+      // white background (CRITICAL FIX)
+      const whiteBg = new Jimp(70, 70, "#ffffff");
+      whiteBg.composite(logo, 5, 5);
+
+      // place at center
       qrImage.composite(
-        logo,
-        qrImage.bitmap.width / 2 - 40,
-        qrImage.bitmap.height / 2 - 40
+        whiteBg,
+        qrImage.bitmap.width / 2 - 35,
+        qrImage.bitmap.height / 2 - 35
       );
 
       const finalBuffer = await qrImage.getBufferAsync(Jimp.MIME_PNG);
